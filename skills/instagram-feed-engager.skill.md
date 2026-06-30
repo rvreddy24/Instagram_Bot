@@ -1,10 +1,12 @@
 name: instagram-feed-engager
 description: |
-  Scrolls the Instagram home feed, skips ads/suggested content, scores organic posts,
-  leaves natural‑sounding comments, likes them, and (optionally) views story rings.
-  All actions are performed with human‑like timing, occasional micro‑movements,
-  viewport/User‑Agent rotation, cache‑only cleaning, and exponential back‑off on
-  rate‑limit detection.
+  Brain-driven feed engagement skill. Reads all engagement criteria from
+  ig:brain:strategy.engagement (niche keywords, comment style, like threshold,
+  story view probability, post age limits) set by the Gemini brain.
+  Scrolls the home feed, skips ads/suggested content, scores organic posts,
+  leaves Gemini-generated natural comments, likes posts, and optionally views
+  story rings. All actions use human-like timing, UA/viewport rotation,
+  cache-only cleaning, and exponential back-off on rate-limit detection.
 categories: [social-media, automation, browser, stealth]
 steps:
   1. **Initialize browser (same stealth launch as the post skill)**
@@ -39,8 +41,24 @@ steps:
        if (Math.random()<0.1) { indexedDB.databases().then(dbs=>dbs.forEach(db=>indexedDB.deleteDatabase(db.name))); }
        ```
   3. **Scrolling loop**
-     - Set `MAX_SCROLLS = 6` (adjustable) and `ENGAGE_PER_RUN = 3`.
+     - **Load brain strategy** for engagement:
+           * Retrieve `ig:brain:strategy` from Hermes memory and parse JSON.
+           * Extract `eng_cfg = strategy.engagement` (or use defaults if missing):
+               - `niche_keywords`         → ["AI", "tech", "machine learning"]
+               - `comment_style`          → "ask a follow-up question"
+               - `like_threshold_score`   → 2
+               - `story_view_probability` → 0.3
+               - `min_post_age_minutes`   → 5
+               - `max_post_age_hours`     → 6
+           * Read configurable limits (memory keys override brain for manual tuning):
+               - `MAX_SCROLLS`    = memory_get(key="ig:max_scrolls")    ?? 6
+               - `ENGAGE_PER_RUN` = memory_get(key="ig:engage_per_run") ?? 3
+     - Initialize counters: `comments_count = 0`, `likes_count = 0`, `story_views_count = 0`.
      - Initialize empty array `engaged = []`.
+     - **Prune stale seen-posts** to cap memory growth:
+           * Retrieve `ig:seen_index` (a JSON array of post IDs in insertion order; default `[]`).
+           * If its length > 500, drop the oldest entries until it is 500 and call `memory remove` for each dropped `ig:seen:<id>` key.
+           * Save the updated index back to `ig:seen_index`.
      - For `i` from 0 to `MAX_SCROLLS-1`:
         * Scroll down by a random offset between 200 and 800 pixels using `browser_scroll(direction="down")` with a custom distance (achieved by sending `window.scrollBy(0, <offset>)` via `browser_console` or by repeating small scrolls).
         * Wait a random delay `await `random(800,1500)` ms to let new content load.
@@ -52,31 +70,47 @@ steps:
           - Skip if the identifier is already in `engaged` or in the memory set `ig:seen:<id>`.
           - Skip if the article contains any element with `aria-label="Sponsored"` or known ad containers (e.g., role="presentation" with typical ad class names).
           - Extract timestamp (look for `<time>` element) and compute age in minutes.
+          - Skip if age < `eng_cfg.min_post_age_minutes` OR age > `eng_cfg.max_post_age_hours * 60`.
           - Extract preview text (first few lines of caption) and author name.
           - Compute a relevance score:
             * Freshness: 2 pts if < 30 min, 1 pt if < 2 h, else 0.
-            * Keyword match: +1 if any of your niche keywords appear in preview.
-            * Author follow status: +2 if you already follow the author (can be inferred from a “Following” badge; otherwise 0).
+            * Keyword match: +2 if any of `eng_cfg.niche_keywords` appear in preview (case-insensitive).
+            * Author follow status: +2 if you already follow the author (inferred from a “Following” badge).
+          - Skip if score < `eng_cfg.like_threshold_score`.
           - Keep the top N (e.g., 5) scored posts in a list `candidates`.
+          - Save `candidates` list to `ig:last_candidates` in memory (used by follow-manager).
   4. **After the scroll loop**, sort `candidates` by score descending.
   5. **Engagement loop** – for each candidate up to `ENGAGE_PER_RUN`:
         a. Click the post link to open it in the modal view.
         b. Wait for the modal to appear (look for `role="dialog"`).
-        c. Generate a short, natural comment using an LLM prompt:
-               "React to this Instagram post in one short, friendly sentence (under 120 characters). Keep it relevant to the visible content."
-               Use the preview text and any visible hashtags as context.
+        c. Generate a short, natural comment using Gemini:
+               - Build a Gemini API call (gemini-1.5-pro, same auth pattern as instagram-brain).
+               - Prompt:
+                 ```
+                 Write a comment for this Instagram post.
+                 Post preview: <preview_text>
+                 Style instruction: <eng_cfg.comment_style>
+                 Max 120 characters. No hashtags. Sound like a real person.
+                 Return ONLY the comment text.
+                 ```
+               - Parse the response text as `comment`.
+               - Fallback if Gemini fails: use a generic relevant comment from a small template set
+                 (e.g., "This is fascinating! 🔥", "Really insightful, thanks for sharing!").
         d. Locate the comment input box (`role="textbox"` with `aria-label="Add a comment…"`).
         e. Type the comment using human‑like keystrokes:
                - Random delay 40‑100 ms per character.
                - Small random pause (200‑500 ms) after every 6‑8 characters.
                - With probability 0.1 insert a tiny typo (extra letter then backspace) to mimic human slip.
-        f. Press Enter to submit.
-        g. Wait 1‑2 s, then locate the like button (usually a `<svg aria-label="Like">`) within the comment area or below the post and click it.
-        h. (Optional) To view the author’s story:
-               - Click the author’s name/link in the header to go to their profile.
-               - If a story ring is visible (circle with a plus or a colored border), click it, wait `random(3000,5000)` ms, then go back to the feed.
+        f. Press Enter to submit. Increment `comments_count` by 1.
+        g. Wait 1‑2 s, then locate the like button (usually a `<svg aria-label="Like">`) within the comment area or below the post and click it. Increment `likes_count` by 1.
+        h. (Optional) View the author's story with probability `eng_cfg.story_view_probability`:
+               - Roll `random(0.0, 1.0)` — only proceed if result < `eng_cfg.story_view_probability`.
+               - Click the author's name/link in the header to go to their profile.
+               - If a story ring is visible (circle with a plus or a colored border), click it, wait `random(3000,5000)` ms, then go back to the feed.
+               - On success, increment `story_views_count` by 1.
         i. Store the interacted post ID in `engaged` and also in Hermes `memory` under `ig:seen:<postid>` to avoid future repeats.
-        j. Add a random delay between engagements (3‑8 s) to look natural.
+           Also append the post ID to `ig:seen_index` and save it back to memory.
+        j. Add a random delay between engagements (3‑8 s) to look natural.
   6. **Rate‑limit detection & back‑off**
         - After each major action (scroll, click, type, etc.) check the page for an error banner containing text like “Please wait a few minutes” or “Try again later”.
         - If detected:
@@ -93,7 +127,10 @@ steps:
             "status": "ok",
             "scrolled": <number of scrolls performed>,
             "candidates_considered": <N>,
-            "engaged": <number of posts commented/liked>,
+            "comments": <comments_count>,
+            "likes": <likes_count>,
+            "story_views": <story_views_count>,
+            "engaged": <comments_count + likes_count>,
             "last_timestamp": <epoch of last action>
           }
   8. **Failure handling**

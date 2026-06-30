@@ -20,19 +20,29 @@ D:\instagram\
 │   README.md            ← this file
 │
 ├─ skills\               ← Hermes SKILL.md files (import via skill_manage)
+│   ├─ instagram-brain.skill.md
+│   ├─ instagram-source-manager.skill.md
 │   ├─ instagram-research-draft.skill.md
 │   ├─ instagram-stealth-post.skill.md
 │   ├─ instagram-feed-engager.skill.md
+│   ├─ instagram-follow-manager.skill.md
+│   ├─ instagram-log-performance.skill.md
 │   ├─ discord-notify.skill.md
-│   └─ instagram-orchestrator-auto.skill.md
+│   ├─ instagram-orchestrator-auto.skill.md
+│   └─ instagram-orchestrator.skill.md     (manual-approval variant)
 │
 ├─ scripts\              ← optional helper scripts (ffmpeg, ImageMagick, etc.)
 │
-├─ logs\                 ← JSON‑line logs from each run (auto‑created)
+├─ logs\                 ← auto-created per-run logs
+│   ├─ performance.jsonl   (per-cycle engagement data + source attribution)
+│   ├─ brain_notes.jsonl   (every brain decision + insight)
+│   ├─ audit_log.jsonl     (weekly deep-audit reports)
+│   ├─ source_log.jsonl    (source add/prune/discovery events)
+│   ├─ follow_log.jsonl    (follow/unfollow actions)
+│   └─ <timestamp>_post.png / _error.png
 │
-├─ drafts\               ← where you place image/video files + markdown drafts
-│
-└─ chrome-profile\       ← persistent Chrome user‑data (login cookies, localStorage)
+├─ drafts\               ← downloaded media + generated draft markdown files
+└─ chrome-profile\       ← persistent Chrome user-data (login cookies)
 ```
 
 ---
@@ -64,20 +74,30 @@ D:\instagram\
    ```
    (The key defaults to `discord_webhook_url`.)
 
-5. **(Optional) Set niche keywords for the engagement skill**  
+5. **Store your Gemini API key** (the brain's power source):  
+   - Get a free key at <https://aistudio.google.com/app/apikey> (Google AI Studio).  
+   ```bash
+   memory action=add target=user key="gemini_api_key" content="YOUR_GEMINI_API_KEY" old_text=""
+   ```
+
+6. **(Optional) Seed initial niche keywords — the brain will evolve these automatically**  
    ```bash
    memory action=add target=user content="AI,LLM,Machine Learning,Deep Learning,Data Science" old_text="" key="ig:niche_keywords"
    ```
-   Feel free to adjust the comma‑separated list.
+   The brain will replace these with smarter, performance-based keywords after a few runs.
 
-6. **Deploy the skill files**  
-   The five skill files have already been written to `D:\instagram\skills\`.  
-   Register each with Hermes (you can run the block below once, or re‑run whenever you edit a file):
+7. **Deploy all skill files**  
+   The skill files have already been written to `D:\instagram\skills\`.  
+   Register each with Hermes (re‑run whenever you edit a file):
    ```bash
-   skill_manage action=create name=instagram-research-draft content="$(cat /d/instagram/skills/instagram-research-draft.skill.md)"
-   skill_manage action=create name=instagram-stealth-post    content="$(cat /d/instagram/skills/instagram-stealth-post.skill.md)"
-   skill_manage action=create name=instagram-feed-engager    content="$(cat /d/instagram/skills/instagram-feed-engager.skill.md)"
-   skill_manage action=create name=discord-notice            content="$(cat /d/instagram/skills/discord-notify.skill.md)"
+   skill_manage action=create name=instagram-brain             content="$(cat /d/instagram/skills/instagram-brain.skill.md)"
+   skill_manage action=create name=instagram-source-manager   content="$(cat /d/instagram/skills/instagram-source-manager.skill.md)"
+   skill_manage action=create name=instagram-research-draft   content="$(cat /d/instagram/skills/instagram-research-draft.skill.md)"
+   skill_manage action=create name=instagram-stealth-post     content="$(cat /d/instagram/skills/instagram-stealth-post.skill.md)"
+   skill_manage action=create name=instagram-feed-engager     content="$(cat /d/instagram/skills/instagram-feed-engager.skill.md)"
+   skill_manage action=create name=instagram-follow-manager   content="$(cat /d/instagram/skills/instagram-follow-manager.skill.md)"
+   skill_manage action=create name=instagram-log-performance  content="$(cat /d/instagram/skills/instagram-log-performance.skill.md)"
+   skill_manage action=create name=discord-notify             content="$(cat /d/instagram/skills/discord-notify.skill.md)"
    skill_manage action=create name=instagram-orchestrator-auto content="$(cat /d/instagram/skills/instagram-orchestrator-auto.skill.md)"
    ```
 
@@ -119,7 +139,7 @@ D:\instagram\
      # 5️⃣ Final notice
      skill_invoke name=discord-notify content="🕒 Cycle complete. Next run in 4 hours."
      """ \
-     skills=["instagram-research-draft","instagram-stealth-post","instagram-feed-engager","discord-notify"] \
+     skills=["instagram-orchestrator-auto","instagram-research-draft","instagram-stealth-post","instagram-feed-engager","discord-notify","instagram-log-performance"] \
      notify_on_complete=true \
      deliver=origin
    ```
@@ -192,12 +212,69 @@ These techniques make the bot’s behavior statistically indistinguishable from 
 | Chrome window pops up visibly | Headless mode not used (intentional for stealth) – you will see a brief Chrome window; it’s normal and helps avoid detection. | No action needed; the window is deliberately shown to mimic a real user session. |
 | Posts appear but with no caption or broken image | Incorrect `media:` path or unsupported file type | Ensure the path is relative to the skill’s working directory (`D:\instagram\`) and the file is a PNG/JPG ≤ 30 MB. |
 | Engagement script likes/comments the same post repeatedly | Memory of seen posts cleared or corrupted | Verify that the key `ig:seen:<postid>` is being set; you can manually clear with `memory action=remove target=user key="ig:seen:*"` if needed, then let it rebuild. |
+| Brain shows "Gemini API key not set" | API key not stored in memory | Run: `memory action=add target=user key="gemini_api_key" content="YOUR_KEY" old_text=""` |
+| Brain status is "fallback" every run | Gemini API unreachable or key invalid | Check your key at https://aistudio.google.com — the bot continues with the last known strategy. |
+| Brain strategy not changing after many runs | Not enough performance data yet | Ensure `./logs/performance.jsonl` is being written each cycle (check log-performance skill). |
+| Follow-manager follows 0 accounts | No qualifying profiles found | Lower `min_followers` or broaden `target_niches` by updating the brain's strategy via memory. |
+
+---
+
+## 🧠 How the Brain Learns (Self-Growth Loop)
+
+The Gemini brain gets smarter with every single run. Here's what happens under the hood:
+
+```
+Run 1–5   → Brain has no data. Uses safe defaults. Posts at random hours.
+Run 6–10  → Sees first engagement patterns. Starts preferring hours that worked.
+Run 11–20 → Topics refined. Comment style tuned. Niche keywords sharpened.
+Run 20+   → High-confidence strategy. Micro-adjustments only. Compound growth.
+```
+
+**What Gemini analyzes each cycle:**
+| Signal | What Brain Learns |
+|--------|------------------|
+| `hour_of_day_ist` + `engagement` | Best times to post (IST-aware) |
+| `topic` + `engagement` | Which subjects your audience loves |
+| `caption_style` + `comments` | What writing style drives conversations |
+| `story_views` trend | Whether to invest time in story viewing |
+| `follow_back` rate | How to improve follow targeting |
+
+**Reading the brain's mind:**
+```bash
+# See the current strategy
+memory action=get target=user key="ig:brain:strategy"
+
+# See the latest insight
+memory action=get target=user key="ig:brain:notes"
+
+# See the full insight history
+cat D:\instagram\logs\brain_notes.jsonl
+
+# See raw performance data
+cat D:\instagram\logs\performance.jsonl
+```
+
+**Manual override** (brain will still learn but obey your caps):
+```bash
+# Force max 4 scrolls per engagement run
+memory action=add target=user key="ig:max_scrolls" content="4" old_text=""
+
+# Force max 2 engagements per run (conservative)
+memory action=add target=user key="ig:engage_per_run" content="2" old_text=""
+```
 
 ---
 
 ## 🎉 You’re Ready!
 
-Once the one‑time steps are complete, **the system runs completely on its own**. You’ll receive real‑time updates in Discord, and the post will appear on your Instagram profile exactly as if you had uploaded it manually—only faster, smarter, and stealthier.
+Once the one‑time steps are complete, **the system runs completely on its own — and gets smarter every cycle**. You’ll receive real‑time updates in Discord including the brain's strategic insight after each run.
+
+The brain controls everything automatically:
+- 📅 **When** to post (learns your audience's active hours in IST)
+- 📝 **What** to post (topics and styles that drive the most engagement)
+- 💬 **How** to comment (Gemini writes each comment uniquely)
+- 👥 **Who** to follow (niche-qualified accounts, auto-unfollows stale follows)
+- 🎯 **What** to engage with (scored by brain-specified keyword relevance)
 
 If you ever need to:
 

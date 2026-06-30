@@ -1,50 +1,49 @@
 name: instagram-orchestrator
 description: |
-  Orchestrates the full Instagram automation pipeline:
-  1. Run the research-and-draft skill to generate a draft and send a Telegram preview.
-  2. Wait for manual approval (via a temporary file signal) or auto‑approve after 15 minutes.
-  3. If approved, run the stealth‑post skill to publish the content.
-  4. Finally, run the feed‑engager skill to like/comment on the home feed.
-  Returns a JSON summary of the outcome.
+  Manual-approval orchestrator. Runs the full pipeline — brain, research, post,
+  engage, follow, log — but pauses after the draft is ready and waits up to
+  15 minutes for the user to approve via Hermes memory key `ig:approval_ready`.
+  If not approved in time, skips posting but still logs the draft.
+  Use instagram-orchestrator-auto for fully autonomous (no-approval) runs.
 categories: [social-media, automation]
 steps:
-  1. Invoke the research‑and‑draft skill:
-        draft_result = skill_invoke(name="instagram-research-draft")
-     Expect the result to contain at least:
-        - draft_path: path to the generated markdown draft
-        - telegram_msg_id: optional ID of the Telegram preview message
-     Store the draft_path in a variable for later steps.
-  2. Set up an approval waiting mechanism:
-        - Create a temporary file /tmp/ig_approved (or use Hermes memory key ig:approval_ready) that will be
-          created when you approve the preview (e.g., via a Telegram bot button that writes this file).
-        - Record the start time (epoch seconds).
-        - Loop while elapsed < 900 seconds (15 min):
-              if the approval file exists → break and set approved = true
-              else sleep 5 seconds.
-        - If the loop exits due to timeout → approved = false.
-  3. If approved:
-        a. Run the stealth‑post skill:
-              post_result = skill_invoke(name="instagram-stealth-post", input=draft_path)
-           Capture the output (status, screenshot, post_id).
-        b. Run the feed‑engager skill:
-              engage_result = skill_invoke(name="instagram-feed-engager")
-        c. Build a final summary:
-              {
-                "stage": "completed",
-                "draft_path": draft_path,
-                "telegram_msg_id": telegram_msg_id,
-                "post_result": post_result,
-                "engage_result": engage_result,
-                "timestamp": <epoch now>
-              }
-     Else (not approved):
-        a. Return a summary indicating the draft was not approved:
-              {
-                "stage": "skipped_approval",
-                "draft_path": draft_path,
-                "telegram_msg_id": telegram_msg_id,
-                "reason": "Approval timeout (15 min) or manual reject",
-                "timestamp": <epoch now>
-              }
-  4. In either case, write the summary JSON to ./logs/orchestration_<timestamp>.json
-     and return it as the skill result.
+  1. **Brain — Pre-cycle evaluation**
+        - Call skill `instagram-brain` with `{mode:"pre"}`.
+        - On error: notify Discord "🧠❌ Brain failed: <message>" and STOP.
+        - Extract `strategy_version`, `brain_notes`, `source_discovery_triggered`.
+        - Notify Discord: "🧠 Brain v<strategy_version> ready. 💡 <brain_notes>"
+
+  2. **Research & Draft**
+        - Call skill `instagram-research-draft`.
+        - Extract `draft_path`, `topic`.
+        - On error: notify Discord "🔎❌ Research failed: <message>" and STOP.
+        - Notify Discord: "🔎 Draft ready: \"<topic>\" → <draft_path>. Waiting for approval (15 min)..."
+
+  3. **Manual approval gate**
+        - Delete any stale `ig:approval_ready` key from Hermes memory.
+        - Record `start_epoch = now()`.
+        - Poll every **5 s** (up to 900 s / 15 min):
+              * `val = memory_get(key="ig:approval_ready")`
+              * If val == "1" → `approved = true`, break.
+        - If loop exits due to timeout → `approved = false`.
+        - To approve from any terminal: `memory action=add target=user key="ig:approval_ready" content="1" old_text=""`.
+
+  4. **If approved — Post, Engage, Follow, Log**
+        a. Call skill `instagram-stealth-post` with `draft_path`.
+           - If status == "ok": notify Discord "✅ Posted (ID: <post_id>)"
+           - Else: notify Discord "❌ Post failed: <error>" and STOP.
+        b. Call skill `instagram-feed-engager`.
+           - Notify Discord: "📈 Engagement: <comments> comments · <likes> likes · <story_views> story views"
+        c. Call skill `instagram-follow-manager`.
+           - Notify Discord: "👥 Follows: +<followed> new · -<unfollowed> unfollowed"
+        d. Call skill `instagram-log-performance` with `draft_path, post_result, engage_result, follow_result, strategy_version`.
+        e. Call skill `instagram-brain` with `{mode:"post", post_result, engage_result, follow_result, draft_path, strategy_version}`.
+           - Notify Discord: "🧠 Post-cycle insight: <insight>"
+           - If `deep_audit_triggered`: call `instagram-brain` with `{mode:"deep-audit"}`.
+        f. Remove `ig:approval_ready` from memory.
+        g. Write summary JSON to `./logs/orchestration_<timestamp>.json` and return it.
+
+  5. **If NOT approved — skip posting**
+        - Notify Discord: "⛔ Draft not approved within 15 min – skipping post."
+        - Remove `ig:approval_ready` from memory.
+        - Return `{stage:"skipped_approval", draft_path, reason:"timeout", timestamp}`.

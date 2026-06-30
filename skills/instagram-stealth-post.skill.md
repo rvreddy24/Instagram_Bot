@@ -32,6 +32,9 @@ steps:
   3. **Warm‑up & clean‑state**
      - Wait a random **start‑up delay** 3 000‑10 000 ms.
      - Navigate to `https://www.instagram.com/` and wait for the feed to load (presence of `[role="feed"]`).
+     - **Detect login wall**: after navigation, check whether the page contains a form with `action` containing `/accounts/login/` or an input with `name="username"`.
+       * If detected, the session has expired. Return immediately:
+         `{status:"error",message:"Session expired – please log in to Instagram once with the persistent Chrome profile and try again"}`
      - **Clear only non‑essential storage** (keeps login cookies):
        ```js
        // executed via browser_console
@@ -68,7 +71,8 @@ steps:
         * Implement exponential back‑off:
           * `base_wait = 60 s` (initial)
           * `wait = base_wait * (2 ^ retry_count)` (max 5 retries)
-          * Wait that amount, then **refresh the page** (`browser_press(key="F5")`) and retry from step 4.
+          * Wait that amount, then **check for a login wall** (same check as step 3) – if found, return `{status:"error",message:"Session expired during rate‑limit backoff"}`.
+          * Then refresh the page (`browser_press(key="F5")`) and retry from step 4.
           * Increment `retry_count` and store it in Hermes memory under `ig:retry_count`.
           * If max retries exceeded → return `{status:"error",message:"Rate limit exceeded after retries"}`.
      - On success:

@@ -13,6 +13,8 @@ steps:
         { "content": "<provided text>" }
         If an optional `embed` field is supplied (as JSON string), merge it into the payload.
   3. Use `execute_code` to perform an HTTP POST to the webhook URL with the payload
-        (Content-Type: application/json). Capture the response.
-  4. If the response status code is 200‑204, return `{ "status":"ok" }`.
+        (Content-Type: application/json). Retry up to **3 times** with a **2-second backoff** between
+        attempts if the response code is not in the 200–204 range or if a network error occurs.
+        Capture the final response.
+  4. If the final response status code is 200–204, return `{ "status":"ok" }`.
         Otherwise return `{ "status":"error", "message":<response body> }`.

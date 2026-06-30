@@ -1,0 +1,16 @@
+# Chrome session – contains login cookies & tokens; NEVER commit
+chrome-profile/
+
+# Runtime output – logs and screenshots from each run
+logs/
+
+# Downloaded media and generated draft files
+drafts/
+
+# Optional helper scripts output
+scripts/*.log
+
+# OS artifacts
+Thumbs.db
+.DS_Store
+desktop.ini
