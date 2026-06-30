@@ -2,11 +2,16 @@
 skills/follow_manager.py — brain-driven follow/unfollow using Playwright.
 Reads target_niches, min_followers, max_following_ratio from brain strategy.
 Logs all actions to ./logs/follow_log.jsonl.
+
+Uses Playwright's managed Chromium (no system Chrome required).
 """
+from __future__ import annotations
+
 import json
 import random
 import re
 import time
+from typing import Optional
 
 from playwright.sync_api import sync_playwright
 
@@ -34,16 +39,27 @@ def run() -> dict:
     ua       = random.choice(USER_AGENTS)
     viewport = random.choice(VIEWPORTS)
 
+    _STEALTH_ARGS = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-background-timer-throttling",
+    ]
+
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             user_data_dir=str(CHROME_PROFILE_DIR),
-            channel="chrome",
             headless=HEADLESS,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            args=_STEALTH_ARGS,
             user_agent=ua,
             viewport=viewport,
+            locale="en-US",
+            timezone_id="Asia/Kolkata",
+            device_scale_factor=2.0,
         )
         page = ctx.new_page()
+        from utils import inject_stealth
+        inject_stealth(page)
         try:
             result = _manage_follows(page, target_niches, min_followers,
                                      max_following_ratio, unfollow_days, follows_per_run)

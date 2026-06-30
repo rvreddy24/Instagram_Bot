@@ -1,10 +1,15 @@
 """
 skills/feed_engager.py — scroll the Instagram home feed, score posts using
 brain's engagement criteria, and leave Gemini-written comments.
+
+Uses Playwright's managed Chromium (no system Chrome required).
 """
+from __future__ import annotations
+
 import random
 import re
 import time
+from typing import Optional
 
 import google.generativeai as genai
 from playwright.sync_api import sync_playwright
@@ -15,7 +20,7 @@ from config import (
     GEMINI_API_KEY, GEMINI_MODEL,
     DEFAULT_MAX_SCROLLS, DEFAULT_ENGAGE_PER_RUN,
 )
-from utils import get_logger, sleep_human, clear_non_essential_storage, scroll_page, now_epoch
+from utils import get_logger, sleep_human, clear_non_essential_storage, scroll_page, inject_stealth, now_epoch
 
 log = get_logger("feed_engager")
 genai.configure(api_key=GEMINI_API_KEY)
@@ -48,16 +53,28 @@ def run() -> dict:
     ua       = random.choice(USER_AGENTS)
     viewport = random.choice(VIEWPORTS)
 
+    _STEALTH_ARGS = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+    ]
+
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             user_data_dir=str(CHROME_PROFILE_DIR),
-            channel="chrome",
             headless=HEADLESS,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            args=_STEALTH_ARGS,
             user_agent=ua,
             viewport=viewport,
+            locale="en-US",
+            timezone_id="Asia/Kolkata",
+            device_scale_factor=2.0,
         )
         page = ctx.new_page()
+        inject_stealth(page)
         try:
             result = _engage(page, niche_kw, comment_style, like_thresh,
                              story_prob, min_age_min, max_age_hrs,

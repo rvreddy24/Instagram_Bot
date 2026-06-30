@@ -1,9 +1,13 @@
 """
 utils.py — shared helpers: logging, human-like delays, typing simulation.
 """
+from __future__ import annotations  # Python 3.9 compatible type hints
+
 import logging
 import random
+import re
 import time
+from typing import Optional
 from pathlib import Path
 from config import LOGS_DIR
 
@@ -14,11 +18,9 @@ def get_logger(name: str) -> logging.Logger:
         logger.setLevel(logging.INFO)
         fmt = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s",
                                 datefmt="%Y-%m-%d %H:%M:%S")
-        # Console
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         logger.addHandler(ch)
-        # File
         fh = logging.FileHandler(LOGS_DIR / "bot.log", encoding="utf-8")
         fh.setFormatter(fmt)
         logger.addHandler(fh)
@@ -35,14 +37,14 @@ def now_epoch() -> int:
     return int(time.time())
 
 
-def ist_hour(epoch: int | None = None) -> int:
+def ist_hour(epoch: Optional[int] = None) -> int:
     """Return current hour in IST (UTC+5:30)."""
     ts = epoch or now_epoch()
     ist_epoch = ts + 5 * 3600 + 30 * 60
     return (ist_epoch // 3600) % 24
 
 
-def utc_hour(epoch: int | None = None) -> int:
+def utc_hour(epoch: Optional[int] = None) -> int:
     ts = epoch or now_epoch()
     return (ts // 3600) % 24
 
@@ -54,16 +56,14 @@ def human_type(page, selector: str, text: str) -> None:
     for char in text:
         page.keyboard.type(char, delay=random.uniform(40, 120))
         if random.random() < 0.08:
-            # occasional short think-pause
             time.sleep(random.uniform(0.15, 0.45))
         if random.random() < 0.04:
-            # tiny typo + backspace
             page.keyboard.type(random.choice("abcdefghijklmnopqrstuvwxyz"))
             time.sleep(0.08)
             page.keyboard.press("Backspace")
 
 
-def scroll_page(page, pixels: int = None) -> None:
+def scroll_page(page, pixels: Optional[int] = None) -> None:
     """Scroll down by a random or specified pixel amount."""
     amount = pixels or random.randint(250, 750)
     page.evaluate(f"window.scrollBy(0, {amount})")
@@ -81,7 +81,37 @@ def clear_non_essential_storage(page) -> None:
     }""")
 
 
+def inject_stealth(page) -> None:
+    """
+    Patch common bot-detection fingerprints.
+    Call once after opening a new page.
+    """
+    page.add_init_script("""
+        // Remove webdriver flag
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+        // Fake realistic plugins list
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5],
+        });
+
+        // Fake language
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en'],
+        });
+
+        // Fake Chrome runtime
+        window.chrome = { runtime: {} };
+
+        // Pass permissions query
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) =>
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+    """)
+
+
 # ── Slug helper ───────────────────────────────────────────────────────────────
 def slugify(text: str) -> str:
-    import re
     return re.sub(r"[^a-z0-9_]", "", text.lower().replace(" ", "_"))

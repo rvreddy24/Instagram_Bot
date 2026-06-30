@@ -8,6 +8,8 @@ The scheduler (scheduler.py) calls this on a repeating schedule.
 """
 import sys
 import traceback
+import state
+from brain.brain import run as brain_run
 from utils import get_logger, now_epoch
 from skills.discord_notify import notify
 
@@ -20,7 +22,6 @@ def run_cycle() -> dict:
     # ── 1. Brain — Pre-cycle ──────────────────────────────────────────────────
     log.info("Step 1: Brain pre-cycle")
     try:
-        from brain.brain import run as brain_run
         brain_pre = brain_run(mode="pre")
     except Exception as e:
         msg = f"Brain pre-cycle crashed: {e}"
@@ -171,9 +172,7 @@ def run_cycle() -> dict:
             notify(f"🧠📊❌ Deep audit crashed: {e}")
 
     # ── 9. Final notice ───────────────────────────────────────────────────────
-    freq = (
-        (state_get_strategy_frequency() or 8)
-    )
+    freq = state.get("brain_strategy", {}).get("posting", {}).get("frequency_hours", 8) or 8
     notify(f"🕒 Cycle {sm.get('total_cycles', '?')} complete. Next run in {freq} h.")
 
     log.info("═══════════════ CYCLE DONE ═══════════════")
@@ -188,13 +187,6 @@ def run_cycle() -> dict:
         "new_confidence": new_confidence,
         "deep_audit_triggered": brain_post.get("deep_audit_triggered", False),
     }
-
-
-def state_get_strategy_frequency() -> int:
-    import state as _state
-    strategy = _state.get("brain_strategy") or {}
-    return strategy.get("posting", {}).get("frequency_hours", 8)
-
 
 if __name__ == "__main__":
     result = run_cycle()
