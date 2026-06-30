@@ -1,16 +1,29 @@
-# Chrome session – contains login cookies & tokens; NEVER commit
+# Chrome session — contains login cookies & tokens; NEVER commit
 chrome-profile/
 
-# Runtime output – logs and screenshots from each run
+# Runtime output
 logs/
-
-# Downloaded media and generated draft files
 drafts/
 
-# Optional helper scripts output
-scripts/*.log
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Secrets
+.env
+state.json
 
 # OS artifacts
-Thumbs.db
 .DS_Store
+Thumbs.db
 desktop.ini
+
+# Process file
+bot.pid
